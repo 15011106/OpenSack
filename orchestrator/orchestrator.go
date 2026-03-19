@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -476,7 +477,15 @@ func (o *Orchestrator) getUserChoice() int {
 }
 
 func (o *Orchestrator) savePlan(plan agents.ImplementationPlan) error {
-	// Save to file (simplified)
+	planJSON, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal plan: %w", err)
+	}
+
+	if err := os.WriteFile("plan.json", planJSON, 0644); err != nil {
+		return fmt.Errorf("failed to write plan.json: %w", err)
+	}
+
 	fmt.Printf("Plan summary: %s\n", plan.Summary)
 	return nil
 }
@@ -489,12 +498,20 @@ Your job:
 1. Follow the plan strictly - no creative decisions
 2. Implement the exact files, functions, and logic specified
 3. Write clean, working code
-4. Return a summary of what you implemented
+4. Provide COMPLETE file content for each file
+
+CRITICAL: For each file, use this exact format:
+
+FILE: path/to/file.ext
+` + "```" + `language
+[complete file content here]
+` + "```" + `
 
 DO NOT:
 - Make architectural decisions (that's done)
 - Add features not in the plan
-- Skip specified requirements`
+- Skip specified requirements
+- Provide partial file content or diffs - ALWAYS provide complete files`
 
 	var developer agents.Agent
 	if o.config.Provider == "bedrock" {
@@ -519,21 +536,24 @@ DO NOT:
 
 %s
 
-Provide:
-1. List of files created/modified
-2. Summary of implementation
-3. Any issues encountered`, string(planJSON))
+For each file, provide COMPLETE content using the format:
+
+FILE: path/to/file.ext
+`+"`"+`go
+[complete file content]
+`+"`"+`
+
+After all files, provide a brief summary.`, string(planJSON))
 
 	response, err := developer.Chat(ctx, prompt)
 	if err != nil {
 		return agents.ImplementationResult{}, err
 	}
 
-	// Parse implementation result
-	result := agents.ImplementationResult{
-		Summary:       response.Message,
-		FilesCreated:  []string{},
-		FilesModified: []string{},
+	// Write files and generate diff
+	result, err := o.writeFilesFromResponse(response.Message)
+	if err != nil {
+		return agents.ImplementationResult{}, fmt.Errorf("failed to write files: %w", err)
 	}
 
 	return result, nil
@@ -666,6 +686,135 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// writeFilesFromResponse parses the developer's response and writes files to disk
+func (o *Orchestrator) writeFilesFromResponse(response string) (agents.ImplementationResult, error) {
+	result := agents.ImplementationResult{
+		FilesCreated:  []string{},
+		FilesModified: []string{},
+		Summary:       "",
+	}
+
+	// Parse response for FILE: markers and code blocks
+	lines := strings.Split(response, "\n")
+	var currentFile string
+	var currentContent strings.Builder
+	inCodeBlock := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Check for FILE: marker
+		if strings.HasPrefix(line, "FILE:") {
+			// Write previous file if any
+			if currentFile != "" && inCodeBlock {
+				if err := o.writeFile(currentFile, currentContent.String(), &result); err != nil {
+					return result, err
+				}
+			}
+
+			// Start new file
+			currentFile = strings.TrimSpace(strings.TrimPrefix(line, "FILE:"))
+			currentContent.Reset()
+			inCodeBlock = false
+			continue
+		}
+
+		// Check for code block markers
+		if strings.HasPrefix(line, "```") {
+			if !inCodeBlock {
+				// Starting code block
+				inCodeBlock = true
+			} else {
+				// Ending code block - write file
+				if currentFile != "" {
+					if err := o.writeFile(currentFile, currentContent.String(), &result); err != nil {
+						return result, err
+					}
+					currentFile = ""
+					currentContent.Reset()
+				}
+				inCodeBlock = false
+			}
+			continue
+		}
+
+		// Collect content inside code block
+		if inCodeBlock && currentFile != "" {
+			currentContent.WriteString(line)
+			currentContent.WriteString("\n")
+		}
+	}
+
+	// Write last file if any
+	if currentFile != "" && inCodeBlock {
+		if err := o.writeFile(currentFile, currentContent.String(), &result); err != nil {
+			return result, err
+		}
+	}
+
+	// Generate git diff
+	if len(result.FilesCreated) > 0 || len(result.FilesModified) > 0 {
+		diff, err := o.generateDiff()
+		if err == nil {
+			result.Diff = diff
+		}
+	}
+
+	// Extract summary (text after all code blocks)
+	summaryStarted := false
+	var summary strings.Builder
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "FILE:") && !strings.HasPrefix(line, "```") {
+			if summaryStarted || (!strings.HasPrefix(line, "FILE:") && len(strings.TrimSpace(line)) > 0) {
+				summaryStarted = true
+				summary.WriteString(line)
+				summary.WriteString("\n")
+			}
+		}
+	}
+	result.Summary = strings.TrimSpace(summary.String())
+
+	if result.Summary == "" {
+		result.Summary = fmt.Sprintf("Created %d files, modified %d files",
+			len(result.FilesCreated), len(result.FilesModified))
+	}
+
+	return result, nil
+}
+
+// writeFile writes a single file and tracks whether it was created or modified
+func (o *Orchestrator) writeFile(filePath, content string, result *agents.ImplementationResult) error {
+	// Check if file exists
+	_, err := os.Stat(filePath)
+	fileExists := err == nil
+
+	// Write file
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", filePath, err)
+	}
+
+	// Track creation vs modification
+	if fileExists {
+		result.FilesModified = append(result.FilesModified, filePath)
+		fmt.Printf("✓ Modified: %s\n", filePath)
+	} else {
+		result.FilesCreated = append(result.FilesCreated, filePath)
+		fmt.Printf("✓ Created: %s\n", filePath)
+	}
+
+	return nil
+}
+
+// generateDiff generates a git diff of uncommitted changes
+func (o *Orchestrator) generateDiff() (string, error) {
+	cmd := fmt.Sprintf("cd %s && git diff HEAD", os.Getenv("PWD"))
+	output, err := exec.CommandContext(context.Background(), "sh", "-c", cmd).Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
 }
 
 func (o *Orchestrator) getArchitectSystemPrompt() string {
