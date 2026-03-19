@@ -37,3 +37,6 @@ go.work.sum
 
 # OS files
 .DS_Store
+
+# Generated projects
+output/

@@ -19,6 +19,7 @@ type Orchestrator struct {
 	config      Config
 	analyzer    *TaskAnalyzer
 	costTracker *CostTracker
+	projectDir  string
 	mu          sync.Mutex
 }
 
@@ -49,11 +50,28 @@ func (o *Orchestrator) Execute(ctx context.Context, goal string) error {
 	fmt.Println("=== Agent Orchestrator ===")
 	fmt.Printf("Goal: %s\n\n", goal)
 
+	// Auto-generate project name from goal
+	suggestedName := o.generateProjectName(goal)
+	fmt.Printf("Suggested project name: '%s'\n", suggestedName)
+	fmt.Printf("Accept or enter custom name [%s]: ", suggestedName)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	var projectName string
+	if scanner.Scan() {
+		projectName = strings.TrimSpace(scanner.Text())
+	}
+	if projectName == "" {
+		projectName = suggestedName
+	}
+
+	// Set project directory
+	o.projectDir = filepath.Join("output", projectName)
+	fmt.Printf("→ Project directory: %s\n\n", o.projectDir)
+
 	// Phase 1: Optional Discovery
 	fmt.Println("\n=== Discovery Phase ===")
 	fmt.Print("Run detailed discovery? (helps architect understand better) [y/N]: ")
 
-	scanner := bufio.NewScanner(os.Stdin)
 	runDiscovery := false
 	if scanner.Scan() {
 		answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
@@ -495,7 +513,13 @@ func (o *Orchestrator) savePlan(plan agents.ImplementationPlan) error {
 		return fmt.Errorf("failed to marshal plan: %w", err)
 	}
 
-	if err := os.WriteFile("plan.json", planJSON, 0644); err != nil {
+	// Create project directory if it doesn't exist
+	if err := os.MkdirAll(o.projectDir, 0755); err != nil {
+		return fmt.Errorf("failed to create project directory: %w", err)
+	}
+
+	planPath := filepath.Join(o.projectDir, "plan.json")
+	if err := os.WriteFile(planPath, planJSON, 0644); err != nil {
 		return fmt.Errorf("failed to write plan.json: %w", err)
 	}
 
@@ -563,10 +587,29 @@ After all files, provide a brief summary.`, string(planJSON))
 		return agents.ImplementationResult{}, err
 	}
 
+	// Debug: show what developer returned
+	fmt.Println("\n--- Developer Response (first 500 chars) ---")
+	if len(response.Message) > 500 {
+		fmt.Println(response.Message[:500] + "...")
+	} else {
+		fmt.Println(response.Message)
+	}
+	fmt.Println("--- End Developer Response ---")
+	fmt.Println()
+
 	// Write files and generate diff
 	result, err := o.writeFilesFromResponse(response.Message)
 	if err != nil {
 		return agents.ImplementationResult{}, fmt.Errorf("failed to write files: %w", err)
+	}
+
+	if len(result.FilesCreated) == 0 && len(result.FilesModified) == 0 {
+		fmt.Println("\n⚠️  Warning: No files were created. Developer might not have followed the format.")
+		fmt.Println("Expected format:")
+		fmt.Println("FILE: path/to/file.ext")
+		fmt.Println("```language")
+		fmt.Println("[code]")
+		fmt.Println("```")
 	}
 
 	return result, nil
@@ -799,22 +842,25 @@ func (o *Orchestrator) writeFilesFromResponse(response string) (agents.Implement
 
 // writeFile writes a single file and tracks whether it was created or modified
 func (o *Orchestrator) writeFile(filePath, content string, result *agents.ImplementationResult) error {
+	// Prepend project directory to file path
+	fullPath := filepath.Join(o.projectDir, filePath)
+
 	// Check if file exists
-	_, err := os.Stat(filePath)
+	_, err := os.Stat(fullPath)
 	fileExists := err == nil
 
 	// Create parent directories if needed
-	dir := filepath.Dir(filePath)
+	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
 	// Write file
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", filePath, err)
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", fullPath, err)
 	}
 
-	// Track creation vs modification
+	// Track creation vs modification (store relative path)
 	if fileExists {
 		result.FilesModified = append(result.FilesModified, filePath)
 		fmt.Printf("✓ Modified: %s\n", filePath)
@@ -834,6 +880,52 @@ func (o *Orchestrator) generateDiff() (string, error) {
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (o *Orchestrator) generateProjectName(goal string) string {
+	// Convert goal to slug-friendly name
+	name := strings.ToLower(goal)
+
+	// Remove common words
+	stopWords := []string{"build", "create", "make", "a", "an", "the", "for", "with", "using"}
+	words := strings.Fields(name)
+	var filtered []string
+	for _, word := range words {
+		isStopWord := false
+		for _, stop := range stopWords {
+			if word == stop {
+				isStopWord = true
+				break
+			}
+		}
+		if !isStopWord && len(word) > 0 {
+			filtered = append(filtered, word)
+		}
+	}
+
+	// Take first 4 meaningful words max
+	if len(filtered) > 4 {
+		filtered = filtered[:4]
+	}
+
+	// Join with hyphens and clean special chars
+	name = strings.Join(filtered, "-")
+	name = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		return -1
+	}, name)
+
+	// Remove consecutive hyphens and trim
+	name = strings.ReplaceAll(name, "--", "-")
+	name = strings.Trim(name, "-")
+
+	if name == "" {
+		name = "generated-project"
+	}
+
+	return name
 }
 
 func (o *Orchestrator) getArchitectSystemPrompt() string {

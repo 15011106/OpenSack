@@ -26,6 +26,7 @@ func TestDeveloperAndReviewPhase(t *testing.T) {
 	}
 
 	orch := NewOrchestrator(config)
+	orch.projectDir = "output/test-project"
 	ctx := context.Background()
 
 	// Create a simple test plan
@@ -72,14 +73,15 @@ func TestDeveloperAndReviewPhase(t *testing.T) {
 			t.Error("No files created or modified")
 		}
 
-		// Verify actual files exist on disk
+		// Verify actual files exist on disk (in project directory)
 		for _, file := range impl.FilesCreated {
-			if _, err := os.Stat(file); os.IsNotExist(err) {
-				t.Errorf("File %s was reported as created but doesn't exist", file)
+			fullPath := "output/test-project/" + file
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				t.Errorf("File %s was reported as created but doesn't exist at %s", file, fullPath)
 			} else {
-				// Clean up
-				defer os.Remove(file)
-				t.Logf("✓ Created file: %s", file)
+				// Clean up entire output directory
+				defer os.RemoveAll("output")
+				t.Logf("✓ Created file: %s (at %s)", file, fullPath)
 			}
 		}
 
