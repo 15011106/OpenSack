@@ -84,13 +84,25 @@ func (o *Orchestrator) Execute(ctx context.Context, goal string) error {
 	fmt.Println("\n✓ Architecture phase complete")
 	fmt.Println("✓ Plan saved to plan.json")
 
-	// Phase 3: Implementation (placeholder)
+	// Phase 3: Implementation
 	fmt.Println("\n=== Implementation Phase ===")
-	fmt.Println("(Developer implementation would happen here)")
+	impl, err := o.DeveloperPhase(ctx, plan)
+	if err != nil {
+		return fmt.Errorf("developer phase failed: %w", err)
+	}
+	fmt.Println("\n✓ Implementation complete")
 
-	// Phase 4: Review (placeholder)
+	// Phase 4: Review
 	fmt.Println("\n=== Review Phase ===")
-	fmt.Println("(Multi-model review would happen here)")
+	reviews, err := o.ReviewPhase(ctx, plan, impl)
+	if err != nil {
+		return fmt.Errorf("review phase failed: %w", err)
+	}
+
+	// Handle review feedback
+	if err := o.handleReviewFeedback(ctx, plan, impl, reviews); err != nil {
+		return fmt.Errorf("review handling failed: %w", err)
+	}
 
 	// Show cost summary
 	fmt.Println("\n" + o.costTracker.GetStats())
