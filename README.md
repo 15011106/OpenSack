@@ -1,24 +1,33 @@
 # OpenSack
 
-A Go-based AI agent orchestrator that intelligently routes tasks between single-architect (fast) and multi-architect (consensus) modes based on complexity analysis.
+A Go-based AI agent orchestrator that manages the complete software development lifecycle from planning to review, with intelligent mode selection based on task complexity.
 
 ## Features
 
-- **Smart Mode Selection**: Automatically analyzes task complexity and selects the optimal mode
-- **Consensus Mode**: Uses 3 different AI models (Claude, GPT-4, Gemini) for complex architectural decisions
-- **Fast Mode**: Single architect for straightforward tasks
-- **Interactive Planning**: Chat with the architect until you approve the plan
-- **Cost Tracking**: Monitor spending and mode usage
-- **User Override**: Always allows manual mode selection
+- **🌐 Multi-Provider**: Supports both Anthropic API and AWS Bedrock
+- **🎯 Interactive Workflow**: No command-line arguments needed - fully guided experience
+- **📊 Smart Mode Selection**: Three complexity modes (Fast/Explore/Consensus)
+- **🔍 Optional Discovery**: Quick 3-step requirements gathering
+- **💬 One-Question-at-a-Time**: Architect asks focused questions, not overwhelming
+- **👨‍💻 Developer Phase**: Claude Haiku implements the plan efficiently
+- **👀 Parallel Review**: Opus + Sonnet review in parallel for quality assurance
+- **💰 Cost Tracking**: Monitor spending and mode usage
 
 ## Architecture
 
 ```
-Discovery → Architecture (Fast/Consensus) → Implementation → Review
-               ↓
-        Complexity Analysis
-        ├─ Simple/Medium → Fast Mode (1 architect)
-        └─ Complex → Consensus Mode (3 architects)
+Provider Selection → Goal Input → Optional Discovery (3 steps)
+                                         ↓
+                              Complexity Analysis
+                    ├─ Score < 3: Simple → Fast Mode
+                    ├─ Score 3-5: Medium → Explore Mode
+                    └─ Score ≥ 6: Complex → Consensus Mode
+                                         ↓
+                        Interactive Architecture (one question at a time)
+                                         ↓
+                            Developer (Claude Haiku)
+                                         ↓
+                          Review (Opus + Sonnet in parallel)
 ```
 
 ## Installation
@@ -34,12 +43,17 @@ cd opensack
 go mod tidy
 ```
 
-3. Set up API keys:
+3. Set up API keys (choose one):
+
+**Option 1: Anthropic API (default)**
 ```bash
 export ANTHROPIC_API_KEY='your-anthropic-key'
-# Optional for consensus mode:
-export OPENAI_API_KEY='your-openai-key'
-export GEMINI_API_KEY='your-gemini-key'
+```
+
+**Option 2: AWS Bedrock**
+```bash
+export CLAUDE_CODE_USE_BEDROCK=1
+export AWS_BEARER_TOKEN_BEDROCK='your-bearer-token'
 ```
 
 4. Build:
@@ -49,28 +63,51 @@ go build -o opensack
 
 ## Usage
 
-### Basic Usage
+### Interactive Workflow
 
+Simply run:
 ```bash
-./opensack "Your goal here"
+./opensack
 ```
 
-### Examples
+You'll be guided through:
 
-**Simple task (Fast mode):**
-```bash
-./opensack "Add a health check endpoint at /health"
-```
+1. **Provider Selection**
+   ```
+   Which provider would you like to use?
+   1. Anthropic API
+   2. AWS Bedrock
+   Choice [1]:
+   ```
 
-**Complex task (Consensus mode):**
-```bash
-./opensack "Design a microservices architecture for real-time chat with authentication"
-```
+2. **Goal Input**
+   ```
+   What would you like to build?
+   > Build a REST API for todo management
+   ```
 
-**Architectural decision (Consensus mode):**
-```bash
-./opensack "Evaluate different approaches for implementing real-time notifications. Compare WebSockets, SSE, and polling."
-```
+3. **Optional Discovery** (y/N to skip)
+   ```
+   Run detailed discovery? (helps architect understand better) [y/N]:
+   ```
+   - If yes: Answer 3 quick questions about requirements, constraints, and concerns
+   - If no: Skip straight to architecture
+
+4. **Complexity Analysis & Mode Selection**
+   - System analyzes your goal
+   - Recommends Fast/Explore/Consensus mode
+   - You can accept or override
+
+5. **Interactive Architecture**
+   - Architect asks **one question at a time**
+   - Answer each question naturally
+   - Type `approved` when ready for proposal
+   - Review proposal and type `approved` again to finalize
+
+6. **Development & Review**
+   - Developer (Haiku) implements the plan
+   - Reviewers (Opus + Sonnet) review in parallel
+   - Consensus on quality and issues
 
 ## Complexity Analysis
 
@@ -83,63 +120,85 @@ The orchestrator analyzes tasks based on:
 - **New technology**: Unfamiliar patterns or frameworks
 
 **Scoring:**
-- Score < 3: Simple → Fast mode
-- Score 3-5: Medium → Fast mode
-- Score ≥ 6: Complex → Consensus mode (by default)
+- Score < 3: Simple → **Fast mode** (single architect)
+- Score 3-5: Medium → **Explore mode** (balanced approach)
+- Score ≥ 6: Complex → **Consensus mode** (multiple architects)
 
 ## Modes
 
-### Fast Mode ($3.43 per feature)
-- Single Claude Opus architect
-- Interactive planning chat
-- Quick for clear requirements
-- Best for: Bug fixes, simple features, well-defined tasks
+### Fast Mode (Score < 3)
+- **Single Claude Opus architect**
+- Interactive one-question-at-a-time planning
+- Claude Haiku developer
+- Opus + Sonnet reviewers
+- **Best for:** Bug fixes, simple features, well-defined tasks
 
-### Consensus Mode ($3.81 per feature)
-- 3 architects (Claude, GPT-4, Gemini)
+### Explore Mode (Score 3-5)
+- **Single Claude Sonnet architect** (balanced approach)
+- Interactive planning with exploration
+- Claude Haiku developer
+- Opus + Sonnet reviewers
+- **Best for:** Medium complexity features, new integrations
+
+### Consensus Mode (Score ≥ 6)
+- **3 parallel architects** (Opus, Sonnet, Haiku with different focuses)
 - Multiple perspectives on complex problems
 - User picks the best approach
 - Interactive refinement
-- Best for: Architecture decisions, complex features, greenfield projects
+- Claude Haiku developer
+- Opus + Sonnet reviewers
+- **Best for:** Architecture decisions, complex features, greenfield projects
 
 ## Configuration
 
-Edit `main.go` to configure:
+The orchestrator is configured in `main.go`:
 
-```
-go
+```go
 config := orchestrator.Config{
-    AnthropicAPIKey:    apiKey,
-    AutoMode:           true,     // Auto-select mode
-    ConsensusThreshold: 6,        // Score to trigger consensus
-    AllowUserOverride:  true,     // Let user override selection
-    AlwaysShowAnalysis: true,     // Show complexity analysis
-    MonthlyBudget:      300.0,    // Budget tracking
+    APIKey:             apiKey,           // Your API key
+    Provider:           provider,         // "anthropic" or "bedrock"
+    AutoMode:           true,             // Auto-select mode based on complexity
+    ConsensusThreshold: 6,                // Score to trigger consensus (default: 6)
+    AllowUserOverride:  true,             // Let user override mode selection
+    AlwaysShowAnalysis: true,             // Show complexity analysis
+    MonthlyBudget:      300.0,            // Budget tracking
 }
 ```
 
 ## Interactive Planning
 
-Once a mode is selected, you'll chat with the architect:
+Once a mode is selected, you'll chat with the architect **one question at a time**:
 
 ```
-Architect: I can help with that. A few questions:
-  - What's the expected load?
-  - Should we handle authentication?
-  - Any existing systems to integrate with?
+Architect: What's the expected load for this API?
 
-You: Expected 1000 concurrent users, yes use OAuth, integrate with our Postgres DB
+You: Around 1000 concurrent users
 
-Architect: Got it. Here's my proposal:
-  1. Use WebSocket for real-time
+Architect: Should we handle authentication?
+
+You: Yes, OAuth2
+
+Architect: Any existing systems to integrate with?
+
+You: Yes, our Postgres database
+
+Architect: I have enough information. Type 'approved' when ready for my proposal.
+
+You: approved
+
+Architect: Here's my proposal:
+  1. REST API with Express.js
   2. Postgres for persistence
-  3. OAuth2 middleware
+  3. OAuth2 middleware with JWT
+  4. Rate limiting for 1000 concurrent users
   Does this sound right?
 
 You: approved
 
 ✓ Plan approved! Generating detailed implementation plan...
 ```
+
+The key improvement: **one focused question at a time**, not overwhelming you with multiple questions at once.
 
 ## Cost Tracking
 
@@ -162,38 +221,54 @@ Mode usage:
 ```
 opensack/
 ├── agents/
-│   ├── types.go       # Data structures
-│   └── claude.go      # Claude API client
+│   ├── types.go           # Data structures
+│   ├── claude.go          # Claude API client (Anthropic)
+│   └── bedrock.go         # Bedrock API client (AWS)
 ├── orchestrator/
-│   ├── analyzer.go    # Complexity analysis
-│   ├── orchestrator.go # Main orchestration logic
-│   └── cost_tracker.go # Cost tracking
-├── main.go            # Entry point
+│   ├── analyzer.go        # Complexity analysis (Fast/Explore/Consensus)
+│   ├── orchestrator.go    # Main orchestration logic
+│   ├── cost_tracker.go    # Cost tracking
+│   ├── orchestrator_test.go        # Developer & Review tests
+│   └── architect_flow_test.go      # One-question-at-a-time test
+├── cmd/
+│   └── test-bedrock/      # Bedrock connection test utility
+├── main.go                # Entry point with interactive flow
 ├── go.mod
 └── README.md
 ```
 
 ## Workflow Details
 
-### 1. Discovery Phase
-- Analyzes the goal
-- Identifies requirements, constraints, risks
-- Determines complexity level
+### 1. Discovery Phase (Optional)
+- **Optional 3-step process** (can skip with N)
+- Step 1: Requirements - key features
+- Step 2: Constraints - technical, security, performance
+- Step 3: Other concerns - risks, assumptions
+- Auto-categorizes responses into appropriate fields
 
 ### 2. Architecture Phase
-- **Complexity Analysis**: Scores the task
-- **Mode Selection**: Fast or Consensus
-- **Interactive Planning**: Chat until "approved"
-- **Plan Generation**: Detailed implementation plan
+- **Complexity Analysis**: Scores the task (0-10+)
+- **Mode Selection**: Fast (< 3), Explore (3-5), Consensus (≥ 6)
+- **Interactive Planning**: One question at a time approach
+- **Two-stage approval**:
+  1. First `approved` → See proposal
+  2. Second `approved` → Generate detailed plan
+- **Plan Generation**: Detailed implementation plan with files, functions, steps
 
-### 3. Implementation Phase (TODO)
-- Developer agent follows the plan
-- Writes code, tests, documentation
+### 3. Implementation Phase ✅
+- **Developer agent** (Claude Haiku) implements the plan
+- Strictly follows the plan - no creative decisions
+- Returns implementation summary
+- Efficient and token-optimized
 
-### 4. Review Phase (TODO)
-- Multiple reviewers critique the code
-- Security, performance, quality checks
-- Fix issues if needed
+### 4. Review Phase ✅
+- **Parallel reviews** from 2 reviewers:
+  - Claude Opus - Quality & architecture focus
+  - Claude Sonnet - Practical implementation focus
+- **Consensus handling**:
+  - All approve → Success ✅
+  - Mixed reviews → Some concerns ⚠️
+  - No approvals → Escalate to architect ❌
 
 ## Customization
 
@@ -221,12 +296,18 @@ complexKeywords: []string{
 
 ## Future Enhancements
 
-- [ ] Implement Developer agent
-- [ ] Implement Reviewer agents (Codex, Gemini)
-- [ ] Add GPT-4 and Gemini clients for consensus mode
+- [x] ~~Implement Developer agent~~ ✅ Done (Claude Haiku)
+- [x] ~~Implement Reviewer agents~~ ✅ Done (Opus + Sonnet)
+- [x] ~~AWS Bedrock support~~ ✅ Done
+- [x] ~~Interactive workflow~~ ✅ Done
+- [x] ~~One-question-at-a-time architecture~~ ✅ Done
+- [x] ~~Optional discovery phase~~ ✅ Done
+- [x] ~~Explore mode~~ ✅ Done
+- [ ] Add GPT-4 and Gemini clients for additional reviewers
+- [ ] Actual file writing/modification in Developer phase
 - [ ] Persistent conversation history
 - [ ] Plan visualization
-- [ ] Integration tests
+- [ ] Review feedback iteration loop
 - [ ] Web UI
 
 ## Contributing
