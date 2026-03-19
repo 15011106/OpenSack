@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -801,6 +802,12 @@ func (o *Orchestrator) writeFile(filePath, content string, result *agents.Implem
 	// Check if file exists
 	_, err := os.Stat(filePath)
 	fileExists := err == nil
+
+	// Create parent directories if needed
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
 
 	// Write file
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
