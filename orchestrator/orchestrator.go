@@ -395,7 +395,14 @@ Let's discuss the approach.`, goal, discovery.Requirements, discovery.Constraint
 	}
 
 	// Generate detailed plan
-	return architect.GeneratePlan(ctx)
+	fmt.Println("Asking architect to generate detailed JSON plan...")
+	plan, err := architect.GeneratePlan(ctx)
+	if err != nil {
+		fmt.Printf("\n❌ Plan generation failed: %v\n", err)
+		return agents.ImplementationPlan{}, err
+	}
+	fmt.Printf("✓ Plan generated with %d files\n", len(plan.Files))
+	return plan, nil
 }
 
 // Helper methods
