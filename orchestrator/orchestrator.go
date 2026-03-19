@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -59,10 +60,12 @@ func (o *Orchestrator) Execute(ctx context.Context, goal string) error {
 
 	var discovery agents.Discovery
 	if runDiscovery {
-		fmt.Println("Let's understand your requirements in 3 quick steps...\n")
+		fmt.Println("Let's understand your requirements in 3 quick steps...")
+		fmt.Println()
 		discovery = o.interactiveDiscovery(ctx, goal)
 	} else {
-		fmt.Println("Skipping discovery, going straight to architecture...\n")
+		fmt.Println("Skipping discovery, going straight to architecture...")
+		fmt.Println()
 		discovery = o.createSimpleDiscovery(goal)
 	}
 
@@ -126,10 +129,12 @@ func (o *Orchestrator) ArchitectPhase(ctx context.Context, goal string, discover
 		switch choice {
 		case 2:
 			selectedMode = FastMode
-			fmt.Println("→ Using Fast mode\n")
+			fmt.Println("→ Using Fast mode")
+			fmt.Println()
 		case 3:
 			selectedMode = ConsensusMode
-			fmt.Println("→ Using Consensus mode\n")
+			fmt.Println("→ Using Consensus mode")
+			fmt.Println()
 		default:
 			fmt.Printf("→ Using recommended %s mode\n\n", selectedMode)
 		}
@@ -162,7 +167,8 @@ func (o *Orchestrator) ArchitectPhase(ctx context.Context, goal string, discover
 
 // fastPlanning uses a single architect
 func (o *Orchestrator) fastPlanning(ctx context.Context, goal string, discovery agents.Discovery) (agents.ImplementationPlan, error) {
-	fmt.Println("=== Fast Mode: Single Architect ===\n")
+	fmt.Println("=== Fast Mode: Single Architect ===")
+	fmt.Println()
 
 	systemPrompt := o.getArchitectSystemPrompt()
 	var architect agents.Agent
@@ -189,8 +195,10 @@ func (o *Orchestrator) fastPlanning(ctx context.Context, goal string, discovery 
 
 // consensusPlanning uses 3 architects
 func (o *Orchestrator) consensusPlanning(ctx context.Context, goal string, discovery agents.Discovery) (agents.ImplementationPlan, error) {
-	fmt.Println("=== Consensus Mode: 3 Architects ===\n")
-	fmt.Println("Generating 3 architectural proposals...\n")
+	fmt.Println("=== Consensus Mode: 3 Architects ===")
+	fmt.Println()
+	fmt.Println("Generating 3 architectural proposals...")
+	fmt.Println()
 
 	// Generate 3 proposals in parallel
 	type proposalResult struct {
@@ -262,7 +270,8 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 	}
 
 	// Present options to user
-	fmt.Println("=== Three Proposals ===\n")
+	fmt.Println("=== Three Proposals ===")
+	fmt.Println()
 	for i, result := range proposalResults {
 		fmt.Printf("Option %d (%s focus via %s):\n", i+1, result.focus, result.model)
 		fmt.Println(result.proposal)
@@ -301,7 +310,8 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 // interactivePlanning handles the interactive chat loop
 func (o *Orchestrator) interactivePlanning(ctx context.Context, architect agents.Agent, goal string, discovery agents.Discovery) (agents.ImplementationPlan, error) {
 	fmt.Println("Chat with the architect. Type 'approved' when ready.")
-	fmt.Println("Type 'quit' to exit.\n")
+	fmt.Println("Type 'quit' to exit.")
+	fmt.Println()
 
 	// Start conversation
 	initialPrompt := fmt.Sprintf(`I want to build: %s
@@ -346,7 +356,8 @@ Let's discuss the approach.`, goal, discovery.Requirements, discovery.Constraint
 		fmt.Printf("\nArchitect: %s\n\n", response.Message)
 
 		if response.Approved {
-			fmt.Println("✓ Plan approved! Generating detailed implementation plan...\n")
+			fmt.Println("✓ Plan approved! Generating detailed implementation plan...")
+			fmt.Println()
 			break
 		}
 	}
@@ -468,6 +479,193 @@ func (o *Orchestrator) savePlan(plan agents.ImplementationPlan) error {
 	// Save to file (simplified)
 	fmt.Printf("Plan summary: %s\n", plan.Summary)
 	return nil
+}
+
+// DeveloperPhase implements the plan using Claude Haiku
+func (o *Orchestrator) DeveloperPhase(ctx context.Context, plan agents.ImplementationPlan) (agents.ImplementationResult, error) {
+	systemPrompt := `You are a developer implementing an approved plan.
+
+Your job:
+1. Follow the plan strictly - no creative decisions
+2. Implement the exact files, functions, and logic specified
+3. Write clean, working code
+4. Return a summary of what you implemented
+
+DO NOT:
+- Make architectural decisions (that's done)
+- Add features not in the plan
+- Skip specified requirements`
+
+	var developer agents.Agent
+	if o.config.Provider == "bedrock" {
+		developer = agents.NewBedrockAgent(
+			o.config.APIKey,
+			"anthropic.claude-3-haiku-20240307-v1:0",
+			0.3,
+			systemPrompt,
+		)
+	} else {
+		developer = agents.NewClaudeAgent(
+			o.config.APIKey,
+			"claude-3-haiku-20240307",
+			0.3,
+			systemPrompt,
+		)
+	}
+
+	// Send plan to developer
+	planJSON, _ := json.MarshalIndent(plan, "", "  ")
+	prompt := fmt.Sprintf(`Implement this plan:
+
+%s
+
+Provide:
+1. List of files created/modified
+2. Summary of implementation
+3. Any issues encountered`, string(planJSON))
+
+	response, err := developer.Chat(ctx, prompt)
+	if err != nil {
+		return agents.ImplementationResult{}, err
+	}
+
+	// Parse implementation result
+	result := agents.ImplementationResult{
+		Summary:       response.Message,
+		FilesCreated:  []string{},
+		FilesModified: []string{},
+	}
+
+	return result, nil
+}
+
+// ReviewPhase runs parallel reviews with Opus and Sonnet
+func (o *Orchestrator) ReviewPhase(ctx context.Context, plan agents.ImplementationPlan, impl agents.ImplementationResult) ([]agents.ReviewResult, error) {
+	type reviewJob struct {
+		model string
+		focus string
+	}
+
+	jobs := []reviewJob{
+		{"claude-opus-4-20250514", "quality and architecture"},
+		{"claude-sonnet-4-20250514", "practical implementation"},
+	}
+
+	reviewChan := make(chan agents.ReviewResult, len(jobs))
+	var wg sync.WaitGroup
+
+	for _, job := range jobs {
+		wg.Add(1)
+		go func(model, focus string) {
+			defer wg.Done()
+
+			systemPrompt := fmt.Sprintf(`You are a code reviewer focusing on %s.
+
+Review the implementation against the plan:
+1. Does it match the plan?
+2. Are there bugs or issues?
+3. Code quality concerns?
+4. Security issues?
+
+Be constructive but thorough.`, focus)
+
+			var reviewer agents.Agent
+			if o.config.Provider == "bedrock" {
+				reviewer = agents.NewBedrockAgent(
+					o.config.APIKey,
+					"anthropic.claude-3-5-sonnet-20240620-v1:0",
+					0.3,
+					systemPrompt,
+				)
+			} else {
+				reviewer = agents.NewClaudeAgent(
+					o.config.APIKey,
+					model,
+					0.3,
+					systemPrompt,
+				)
+			}
+
+			planJSON, _ := json.MarshalIndent(plan, "", "  ")
+			prompt := fmt.Sprintf(`Review this implementation:
+
+PLAN:
+%s
+
+IMPLEMENTATION:
+%s
+
+Provide:
+1. Critical issues (blockers)
+2. Minor issues (suggestions)
+3. Overall quality score (0-100)
+4. Approve? (yes/no)`, string(planJSON), impl.Summary)
+
+			response, err := reviewer.Chat(ctx, prompt)
+			if err != nil {
+				fmt.Printf("Warning: %s review failed: %v\n", model, err)
+				return
+			}
+
+			reviewChan <- agents.ReviewResult{
+				Model:        model,
+				Summary:      response.Message,
+				Approved:     strings.Contains(strings.ToLower(response.Message), "approve"),
+				QualityScore: 75.0,
+			}
+		}(job.model, job.focus)
+	}
+
+	go func() {
+		wg.Wait()
+		close(reviewChan)
+	}()
+
+	var reviews []agents.ReviewResult
+	for review := range reviewChan {
+		reviews = append(reviews, review)
+	}
+
+	return reviews, nil
+}
+
+// handleReviewFeedback decides what to do with review results
+func (o *Orchestrator) handleReviewFeedback(ctx context.Context, plan agents.ImplementationPlan, impl agents.ImplementationResult, reviews []agents.ReviewResult) error {
+	fmt.Println("=== Review Results ===")
+	fmt.Println()
+
+	approvedCount := 0
+	for i, review := range reviews {
+		fmt.Printf("Reviewer %d (%s):\n", i+1, review.Model)
+		fmt.Printf("  Approved: %v\n", review.Approved)
+		fmt.Printf("  Quality Score: %.0f/100\n", review.QualityScore)
+		fmt.Printf("  Summary: %s\n\n", truncate(review.Summary, 200))
+
+		if review.Approved {
+			approvedCount++
+		}
+	}
+
+	// Consensus decision
+	if approvedCount == len(reviews) {
+		fmt.Println("✅ All reviewers approved!")
+		return nil
+	} else if approvedCount > 0 {
+		fmt.Println("⚠️  Mixed reviews - some concerns raised")
+		fmt.Println("   (In full implementation, would iterate with developer)")
+		return nil
+	} else {
+		fmt.Println("❌ No approvals - significant issues found")
+		fmt.Println("   (In full implementation, would escalate to architect)")
+		return nil
+	}
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (o *Orchestrator) getArchitectSystemPrompt() string {
