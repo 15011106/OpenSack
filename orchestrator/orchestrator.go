@@ -46,8 +46,25 @@ func (o *Orchestrator) Execute(ctx context.Context, goal string) error {
 	fmt.Println("=== Agent Orchestrator ===")
 	fmt.Printf("Goal: %s\n\n", goal)
 
-	// Phase 1: Discovery (simplified for now)
-	discovery := o.createDiscovery(goal)
+	// Phase 1: Optional Discovery
+	fmt.Println("\n=== Discovery Phase ===")
+	fmt.Print("Run detailed discovery? (helps architect understand better) [y/N]: ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	runDiscovery := false
+	if scanner.Scan() {
+		answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		runDiscovery = answer == "y" || answer == "yes"
+	}
+
+	var discovery agents.Discovery
+	if runDiscovery {
+		fmt.Println("Let's understand your requirements in 3 quick steps...\n")
+		discovery = o.interactiveDiscovery(ctx, goal)
+	} else {
+		fmt.Println("Skipping discovery, going straight to architecture...\n")
+		discovery = o.createSimpleDiscovery(goal)
+	}
 
 	// Phase 2: Architecture with smart mode selection
 	plan, err := o.ArchitectPhase(ctx, goal, discovery)
@@ -339,8 +356,7 @@ Let's discuss the approach.`, goal, discovery.Requirements, discovery.Constraint
 }
 
 // Helper methods
-func (o *Orchestrator) createDiscovery(goal string) agents.Discovery {
-	// Simplified discovery for now
+func (o *Orchestrator) createSimpleDiscovery(goal string) agents.Discovery {
 	return agents.Discovery{
 		Goal:                    goal,
 		Requirements:            []string{"Implement the requested feature"},
@@ -351,6 +367,87 @@ func (o *Orchestrator) createDiscovery(goal string) agents.Discovery {
 		PerformanceRequirements: []string{},
 		EstimatedComplexity:     "medium",
 	}
+}
+
+func (o *Orchestrator) interactiveDiscovery(ctx context.Context, goal string) agents.Discovery {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	discovery := agents.Discovery{
+		Goal:                    goal,
+		Requirements:            []string{},
+		Constraints:             []string{},
+		Risks:                   []string{},
+		Assumptions:             []string{},
+		SecurityRequirements:    []string{},
+		PerformanceRequirements: []string{},
+		EstimatedComplexity:     "medium",
+	}
+
+	// Step 1: Requirements
+	fmt.Println("📋 Step 1/3: Requirements")
+	fmt.Print("   Key features or what it should do (comma-separated, or Enter to skip): ")
+	if scanner.Scan() {
+		text := strings.TrimSpace(scanner.Text())
+		if text != "" {
+			features := strings.Split(text, ",")
+			for _, f := range features {
+				if trimmed := strings.TrimSpace(f); trimmed != "" {
+					discovery.Requirements = append(discovery.Requirements, trimmed)
+				}
+			}
+		}
+	}
+
+	// Step 2: Constraints (combined: technical, security, performance)
+	fmt.Println("\n⚙️  Step 2/3: Constraints & Requirements")
+	fmt.Print("   Technical limits, security needs, or performance requirements (comma-separated, or Enter to skip): ")
+	if scanner.Scan() {
+		text := strings.TrimSpace(scanner.Text())
+		if text != "" {
+			items := strings.Split(text, ",")
+			for _, item := range items {
+				trimmed := strings.TrimSpace(item)
+				if trimmed != "" {
+					lower := strings.ToLower(trimmed)
+					if strings.Contains(lower, "auth") || strings.Contains(lower, "security") || strings.Contains(lower, "permission") {
+						discovery.SecurityRequirements = append(discovery.SecurityRequirements, trimmed)
+					} else if strings.Contains(lower, "performance") || strings.Contains(lower, "scale") || strings.Contains(lower, "load") {
+						discovery.PerformanceRequirements = append(discovery.PerformanceRequirements, trimmed)
+					} else {
+						discovery.Constraints = append(discovery.Constraints, trimmed)
+					}
+				}
+			}
+		}
+	}
+
+	// Step 3: Other concerns
+	fmt.Println("\n🎯 Step 3/3: Other Concerns")
+	fmt.Print("   Any risks, assumptions, or concerns? (comma-separated, or Enter to skip): ")
+	if scanner.Scan() {
+		text := strings.TrimSpace(scanner.Text())
+		if text != "" {
+			items := strings.Split(text, ",")
+			for _, item := range items {
+				if trimmed := strings.TrimSpace(item); trimmed != "" {
+					discovery.Risks = append(discovery.Risks, trimmed)
+				}
+			}
+		}
+	}
+
+	// Estimate complexity based on gathered info
+	complexity := len(discovery.Requirements) + len(discovery.SecurityRequirements) + len(discovery.PerformanceRequirements)
+	if complexity < 3 {
+		discovery.EstimatedComplexity = "low"
+	} else if complexity < 6 {
+		discovery.EstimatedComplexity = "medium"
+	} else {
+		discovery.EstimatedComplexity = "high"
+	}
+
+	fmt.Println("\n✓ Discovery complete!")
+	return discovery
 }
 
 func (o *Orchestrator) getUserChoice() int {
