@@ -146,7 +146,7 @@ func (t *TaskAnalyzer) Analyze(goal string, discovery agents.Discovery) Complexi
 		mode = ConsensusMode
 	} else if score >= 3 {
 		level = Medium
-		mode = FastMode
+		mode = ExploreMode
 	} else {
 		level = Simple
 		mode = FastMode
