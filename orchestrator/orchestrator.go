@@ -153,7 +153,7 @@ func (o *Orchestrator) fastPlanning(ctx context.Context, goal string, discovery 
 	if o.config.Provider == "bedrock" {
 		architect = agents.NewBedrockAgent(
 			o.config.APIKey,
-			"us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+			"anthropic.claude-3-5-sonnet-20240620-v1:0",
 			0.3,
 			systemPrompt,
 		)
