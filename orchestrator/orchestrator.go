@@ -21,7 +21,8 @@ type Orchestrator struct {
 
 // Config for orchestrator
 type Config struct {
-	AnthropicAPIKey    string
+	APIKey             string
+	Provider           string // "anthropic" or "bedrock"
 	OpenAIAPIKey       string
 	GeminiAPIKey       string
 	AutoMode           bool
@@ -147,12 +148,23 @@ func (o *Orchestrator) fastPlanning(ctx context.Context, goal string, discovery 
 	fmt.Println("=== Fast Mode: Single Architect ===\n")
 
 	systemPrompt := o.getArchitectSystemPrompt()
-	architect := agents.NewClaudeAgent(
-		o.config.AnthropicAPIKey,
-		"claude-opus-4-20250514", // Opus 4.6
-		0.3,
-		systemPrompt,
-	)
+	var architect agents.Agent
+
+	if o.config.Provider == "bedrock" {
+		architect = agents.NewBedrockAgent(
+			o.config.APIKey,
+			"anthropic.claude-3-5-sonnet-20241022-v2:0",
+			0.3,
+			systemPrompt,
+		)
+	} else {
+		architect = agents.NewClaudeAgent(
+			o.config.APIKey,
+			"claude-opus-4-20250514", // Opus 4.6
+			0.3,
+			systemPrompt,
+		)
+	}
 
 	// Interactive planning
 	return o.interactivePlanning(ctx, architect, goal, discovery)
@@ -195,7 +207,13 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 
 			// For now, only use Claude (we'd add GPT/Gemini clients later)
 			systemPrompt := fmt.Sprintf("You are an architect focusing on %s. Propose an approach.", focus)
-			agent := agents.NewClaudeAgent(o.config.AnthropicAPIKey, model, 0.3, systemPrompt)
+			var agent agents.Agent
+
+			if o.config.Provider == "bedrock" {
+				agent = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20241022-v2:0", 0.3, systemPrompt)
+			} else {
+				agent = agents.NewClaudeAgent(o.config.APIKey, model, 0.3, systemPrompt)
+			}
 
 			resp, err := agent.Chat(ctx, prompt)
 			proposalChan <- proposalResult{
@@ -246,7 +264,13 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 	// Continue with interactive refinement
 	fmt.Println("=== Interactive Refinement ===")
 	systemPrompt := o.getArchitectSystemPrompt()
-	architect := agents.NewClaudeAgent(o.config.AnthropicAPIKey, selected.model, 0.3, systemPrompt)
+	var architect agents.Agent
+
+	if o.config.Provider == "bedrock" {
+		architect = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20241022-v2:0", 0.3, systemPrompt)
+	} else {
+		architect = agents.NewClaudeAgent(o.config.APIKey, selected.model, 0.3, systemPrompt)
+	}
 
 	// Seed with selected proposal
 	_, err := architect.Chat(ctx, fmt.Sprintf("Building on this approach:\n%s\n\nLet's refine it.", selected.proposal))
