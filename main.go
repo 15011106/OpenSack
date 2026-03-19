@@ -11,54 +11,61 @@ import (
 )
 
 func main() {
-	// Check for Bedrock mode first (Option 3)
-	useBedrock := os.Getenv("CLAUDE_CODE_USE_BEDROCK") == "1"
-	bedrockToken := os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
+	fmt.Println("OpenSack")
+	fmt.Println("==================")
+
+	// Ask user which provider to use
+	fmt.Println("\nWhich provider would you like to use?")
+	fmt.Println("1. Anthropic API")
+	fmt.Println("2. AWS Bedrock")
+	fmt.Print("\nChoice [1]: ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	var choice string
+	if scanner.Scan() {
+		choice = strings.TrimSpace(scanner.Text())
+	}
+	if choice == "" {
+		choice = "1"
+	}
 
 	var apiKey string
 	var provider string
 
-	if useBedrock && bedrockToken != "" {
-		// Option 3: Using Bedrock
+	switch choice {
+	case "2":
+		// User chose Bedrock
 		provider = "bedrock"
-		apiKey = bedrockToken
-		fmt.Println("OpenSack (Bedrock Mode)")
-		fmt.Println("==================")
-	} else {
-		// Option 1 or 2: Using Anthropic
+		apiKey = os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
+
+		if apiKey == "" {
+			fmt.Println("\nError: AWS_BEARER_TOKEN_BEDROCK not set")
+			fmt.Println("\nPlease set it:")
+			fmt.Println("  export AWS_BEARER_TOKEN_BEDROCK='your-bearer-token'")
+			os.Exit(1)
+		}
+		fmt.Println("\n✓ Using AWS Bedrock")
+
+	case "1":
+		fallthrough
+	default:
+		// User chose Anthropic (default)
 		provider = "anthropic"
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 
 		if apiKey == "" {
-			// Option 2: No env var - expect CLI arg
-			if len(os.Args) < 2 {
-				fmt.Println("OpenSack")
-				fmt.Println("==================")
-				fmt.Println("\nUsage:")
-				fmt.Println("  Option 1 (recommended): Set environment variable")
-				fmt.Println("    export ANTHROPIC_API_KEY='your-api-key'")
-				fmt.Println("    opensack")
-				fmt.Println("\n  Option 2: Provide API key as argument")
-				fmt.Println("    opensack 'your-api-key'")
-				fmt.Println("\n  Option 3: Use AWS Bedrock")
-				fmt.Println("    export CLAUDE_CODE_USE_BEDROCK=1")
-				fmt.Println("    export AWS_BEARER_TOKEN_BEDROCK='your-bearer-token'")
-				fmt.Println("    opensack")
-				os.Exit(1)
-			}
-			apiKey = os.Args[1]
-			fmt.Println("⚠️  Warning: API key provided via command line (will appear in shell history)")
-			fmt.Println("   Consider using: export ANTHROPIC_API_KEY='...'")
+			fmt.Println("\nError: ANTHROPIC_API_KEY not set")
+			fmt.Println("\nPlease set it:")
+			fmt.Println("  export ANTHROPIC_API_KEY='your-api-key'")
+			os.Exit(1)
 		}
-		fmt.Println("OpenSack")
-		fmt.Println("==================")
+		fmt.Println("\n✓ Using Anthropic API")
 	}
 
-	// Prompt for goal after credentials are set
+	// Prompt for goal after provider and credentials are set
 	fmt.Println("\nWhat would you like to build?")
 	fmt.Print("> ")
 
-	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
 		fmt.Println("\nError: No goal provided")
 		os.Exit(1)
