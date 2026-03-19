@@ -114,14 +114,33 @@ func (c *ClaudeAgent) GeneratePlan(ctx context.Context) (ImplementationPlan, err
 	planPrompt := `Our discussion is complete and approved.
 Generate a detailed implementation plan in JSON format.
 
-The plan must be PRESCRIPTIVE and include:
-1. Exact files to modify/create
-2. Exact functions to add/modify with step-by-step logic
-3. Security boundaries and validations
-4. Test requirements
-5. Decision log with rationales
+CRITICAL: The developer CANNOT make any decisions. You MUST provide:
+1. EXACT file paths (e.g., "cmd/main.go", "api/handler.go")
+2. EXACT function signatures (e.g., "func HandleRequest(w http.ResponseWriter, r *http.Request)")
+3. STEP-BY-STEP logic for each function (e.g., ["Parse request body", "Validate input", "Call database", "Return JSON"])
+4. What structs/types to define with exact field names and types
 
-Format as JSON matching the ImplementationPlan structure.`
+EXAMPLE of what you must provide:
+{
+  "summary": "REST API with authentication",
+  "files": [
+    {
+      "path": "main.go",
+      "action": "create",
+      "description": "Entry point",
+      "functions": [
+        {
+          "name": "main",
+          "signature": "func main()",
+          "description": "Start HTTP server",
+          "steps": ["Initialize router", "Register handlers", "Start server on :8080"]
+        }
+      ]
+    }
+  ]
+}
+
+Format as JSON. Wrap in json code block.`
 
 	response, err := c.Chat(ctx, planPrompt)
 	if err != nil {
@@ -143,14 +162,22 @@ Format as JSON matching the ImplementationPlan structure.`
 
 	err = json.Unmarshal([]byte(content), &plan)
 	if err != nil {
-		// If JSON parsing fails, create a basic plan from the text
-		plan = ImplementationPlan{
-			Summary:             "Implementation plan",
-			ConversationSummary: c.summarizeConversation(),
-		}
+		return ImplementationPlan{}, fmt.Errorf("failed to parse plan JSON: %w\n\nResponse was:\n%s", err, response.Message[:min(len(response.Message), 500)])
+	}
+
+	// Validate plan has minimum required fields
+	if len(plan.Files) == 0 {
+		return ImplementationPlan{}, fmt.Errorf("plan has no files specified - architect must provide detailed file specifications")
 	}
 
 	return plan, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GetConversationHistory returns the conversation history

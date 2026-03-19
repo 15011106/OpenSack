@@ -531,24 +531,41 @@ func (o *Orchestrator) savePlan(plan agents.ImplementationPlan) error {
 func (o *Orchestrator) DeveloperPhase(ctx context.Context, plan agents.ImplementationPlan) (agents.ImplementationResult, error) {
 	systemPrompt := `You are a developer implementing an approved plan.
 
-Your job:
-1. Follow the plan strictly - no creative decisions
-2. Implement the exact files, functions, and logic specified
-3. Write clean, working code
-4. Provide COMPLETE file content for each file
-
-CRITICAL: For each file, use this exact format:
+CRITICAL FORMAT REQUIREMENT:
+You MUST provide complete file content using EXACTLY this format for EACH file:
 
 FILE: path/to/file.ext
-` + "```" + `language
-[complete file content here]
+` + "```" + `go
+[complete file content]
 ` + "```" + `
 
+FILE: another/file.go
+` + "```" + `go
+[complete file content]
+` + "```" + `
+
+EXAMPLE:
+FILE: main.go
+` + "```" + `go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello")
+}
+` + "```" + `
+
+Your job:
+1. Follow the plan strictly - no creative decisions
+2. Write clean, working code with COMPLETE file content
+3. Use the FILE: format for EVERY file
+
 DO NOT:
-- Make architectural decisions (that's done)
-- Add features not in the plan
-- Skip specified requirements
-- Provide partial file content or diffs - ALWAYS provide complete files`
+- Provide summaries without files
+- Provide partial code or snippets
+- Skip the FILE: marker
+- Make architectural decisions`
 
 	var developer agents.Agent
 	if o.config.Provider == "bedrock" {
@@ -573,14 +590,23 @@ DO NOT:
 
 %s
 
-For each file, provide COMPLETE content using the format:
+CRITICAL: Provide COMPLETE file content for ALL files using EXACTLY this format:
 
 FILE: path/to/file.ext
 `+"`"+`go
-[complete file content]
+package main
+
+func main() {
+    // complete code here
+}
 `+"`"+`
 
-After all files, provide a brief summary.`, string(planJSON))
+FILE: next/file.go
+`+"`"+`go
+// complete code for next file
+`+"`"+`
+
+You MUST use the "FILE:" marker before each code block. Do NOT just provide explanations.`, string(planJSON))
 
 	response, err := developer.Chat(ctx, prompt)
 	if err != nil {
