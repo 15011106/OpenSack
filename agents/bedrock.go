@@ -33,13 +33,13 @@ func NewBedrockAgent(bearerToken, model string, temperature float64, systemPromp
 	}
 }
 
-// BedrockRequest for Bedrock API
+// BedrockRequest for Bedrock API (Claude format)
 type BedrockRequest struct {
-	Model       string       `json:"model"`
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature float64      `json:"temperature"`
-	System      string       `json:"system"`
-	Messages    []BedrockMsg `json:"messages"`
+	AnthropicVersion string       `json:"anthropic_version"`
+	MaxTokens        int          `json:"max_tokens"`
+	Temperature      float64      `json:"temperature,omitempty"`
+	System           string       `json:"system,omitempty"`
+	Messages         []BedrockMsg `json:"messages"`
 }
 
 type BedrockMsg struct {
@@ -79,11 +79,11 @@ func (b *BedrockAgent) Chat(ctx context.Context, message string) (Response, erro
 
 	// Call Bedrock API
 	request := BedrockRequest{
-		Model:       b.model,
-		MaxTokens:   4096,
-		Temperature: b.temperature,
-		System:      b.systemPrompt,
-		Messages:    messages,
+		AnthropicVersion: "bedrock-2023-05-31",
+		MaxTokens:        4096,
+		Temperature:      b.temperature,
+		System:           b.systemPrompt,
+		Messages:         messages,
 	}
 
 	responseText, err := b.callBedrockAPI(ctx, request)
@@ -170,8 +170,9 @@ func (b *BedrockAgent) callBedrockAPI(ctx context.Context, request BedrockReques
 		return "", err
 	}
 
-	// Use Bedrock endpoint
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://bedrock-runtime.us-east-1.amazonaws.com/model/invoke", bytes.NewBuffer(jsonData))
+	// Use Bedrock endpoint with model ID in path
+	endpoint := fmt.Sprintf("https://bedrock-runtime.ap-northeast-2.amazonaws.com/model/%s/invoke", b.model)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -186,18 +187,19 @@ func (b *BedrockAgent) callBedrockAPI(ctx context.Context, request BedrockReques
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("Bedrock API error: %s - %s", resp.Status, string(body))
 	}
 
 	var apiResp BedrockResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return "", err
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w - body: %s", err, string(body))
 	}
 
 	if len(apiResp.Content) == 0 {
-		return "", fmt.Errorf("empty response from Bedrock API")
+		return "", fmt.Errorf("empty response from Bedrock API - body: %s", string(body))
 	}
 
 	return apiResp.Content[0].Text, nil

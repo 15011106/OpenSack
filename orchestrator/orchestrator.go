@@ -153,7 +153,7 @@ func (o *Orchestrator) fastPlanning(ctx context.Context, goal string, discovery 
 	if o.config.Provider == "bedrock" {
 		architect = agents.NewBedrockAgent(
 			o.config.APIKey,
-			"anthropic.claude-3-5-sonnet-20241022-v2:0",
+			"us.anthropic.claude-3-5-sonnet-20240620-v1:0",
 			0.3,
 			systemPrompt,
 		)
@@ -210,7 +210,7 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 			var agent agents.Agent
 
 			if o.config.Provider == "bedrock" {
-				agent = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20241022-v2:0", 0.3, systemPrompt)
+				agent = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20240620-v1:0", 0.3, systemPrompt)
 			} else {
 				agent = agents.NewClaudeAgent(o.config.APIKey, model, 0.3, systemPrompt)
 			}
@@ -267,7 +267,7 @@ Keep it concise (2-3 paragraphs).`, goal, focus)
 	var architect agents.Agent
 
 	if o.config.Provider == "bedrock" {
-		architect = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20241022-v2:0", 0.3, systemPrompt)
+		architect = agents.NewBedrockAgent(o.config.APIKey, "anthropic.claude-3-5-sonnet-20240620-v1:0", 0.3, systemPrompt)
 	} else {
 		architect = agents.NewClaudeAgent(o.config.APIKey, selected.model, 0.3, systemPrompt)
 	}

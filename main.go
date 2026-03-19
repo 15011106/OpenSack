@@ -44,6 +44,7 @@ func main() {
 			fmt.Println("  export AWS_BEARER_TOKEN_BEDROCK='your-bearer-token'")
 			os.Exit(1)
 		}
+		fmt.Println(apiKey)
 		fmt.Println("\n✓ Using AWS Bedrock")
 
 	case "1":
